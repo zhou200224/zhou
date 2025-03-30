@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>王某寻炫记</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+            touch-action: manipulation;
+        }
+        #game-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        #maze-canvas {
+            background-color: #fff;
+            border: 1px solid #ccc;
+            margin: 10px auto;
+            display: block;
+            touch-action: none;
+        }
+        #controls {
+            margin: 10px 0;
+        }
+        button {
+            padding: 8px 15px;
+            margin: 0 5px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #game-info {
+            margin: 10px 0;
+            font-size: 18px;
+        }
+        #mobile-controls {
+            display: none;
+            margin-top: 10px;
+        }
+        .control-row {
+            display: flex;
+            justify-content: center;
+        }
+        .control-btn {
+            width: 60px;
+            height: 60px;
+            margin: 5px;
+            font-size: 24px;
+            background-color: #2196F3;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            user-select: none;
+            transition: transform 0.1s;
+            touch-action: manipulation;
+        }
+        .control-btn:active {
+            transform: scale(0.9);
+            background-color: #1976D2;
+        }
+        @media (max-width: 600px) {
+            #mobile-controls {
+                display: block;
+            }
+            #maze-canvas {
+                width: 100%;
+                height: auto;
+                max-width: 400px;
+            }
+        }
+        #kiss-effect {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(0,0,0,0.7);
+            z-index: 100;
+            font-size: 100px;
+            color: red;
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <h1>迷宫冒险</h1>
+        <div id="game-info">
+            关卡: <span id="level">1</span> | 
+            时间: <span id="time">60</span>秒 | 
+            最佳: <span id="best-time">0</span>秒
+        </div>
+        <canvas id="maze-canvas"></canvas>
+        <div id="controls">
+            <button id="restart-btn">重新开始</button>
+            <button id="next-level-btn" disabled>下一关</button>
+        </div>
+        <div id="mobile-controls">
+            <div class="control-row">
+                <div class="control-btn" id="up-btn">↑</div>
+            </div>
+            <div class="control-row">
+                <div class="control-btn" id="left-btn">←</div>
+                <div class="control-btn" id="down-btn">↓</div>
+                <div class="control-btn" id="right-btn">→</div>
+            </div>
+        </div>
+        <audio id="bg-music" loop>
+            <source src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" type="audio/mpeg">
+            您的浏览器不支持音频元素。
+        </audio>
+        <div>
+            <button id="music-btn">播放音乐</button>
+        </div>
+    </div>
+
+    <div id="kiss-effect">😘</div>
+
+    <script>
+        // 游戏常量
+        const CELL_SIZE = 20;
+        const PLAYER_SIZE = 15;
+        const WALL_COLOR = '#333';
+        const PATH_COLOR = '#fff';
+        const PLAYER_COLOR = '#4CAF50';
+        const START_COLOR = '#2196F3';
+        const END_COLOR = '#FF5722';
+        
+        // 游戏变量
+        let canvas, ctx;
+        let maze = [];
+        let player = { x: 0, y: 0 };
+        let end = { x: 0, y: 0 };
+        let level = 1;
+        let timeLeft = 0;
+        let timer;
+        let bestTimes = {};
+        let musicPlaying = false;
+        
+        // DOM元素
+        const levelDisplay = document.getElementById('level');
+        const timeDisplay = document.getElementById('time');
+        const bestTimeDisplay = document.getElementById('best-time');
+        const restartBtn = document.getElementById('restart-btn');
+        const nextLevelBtn = document.getElementById('next-level-btn');
+        const musicBtn = document.getElementById('music-btn');
+        const bgMusic = document.getElementById('bg-music');
+        const kissEffect = document.getElementById('kiss-effect');
+        
+        // 初始化游戏
+        function initGame() {
+            canvas = document.getElementById('maze-canvas');
+            ctx = canvas.getContext('2d');
+            
+            // 动态设置画布大小
+            const containerWidth = document.getElementById('game-container').offsetWidth;
+            const maxCanvasSize = Math.min(400, containerWidth - 40);
+            canvas.width = maxCanvasSize;
+            canvas.height = maxCanvasSize;
+            
+            // 设置关卡时间
+            timeLeft = Math.max(20, 70 - level * 5);
+            timeDisplay.textContent = timeLeft;
+            
+            // 生成迷宫
+            const mazeSize = Math.min(15, 5 + Math.floor(level / 2));
+            generateMaze(mazeSize, mazeSize);
+            
+            // 事件监听器
+            setupEventListeners();
+            
+            // 开始计时
+            startTimer();
+            
+            // 绘制初始状态
+            drawMaze();
+        }
+
+        function setupEventListeners() {
+            // 桌面端键盘事件
+            document.addEventListener('keydown', handleKeyDown);
+            
+            // 按钮事件
+            restartBtn.addEventListener('click', restartLevel);
+            nextLevelBtn.addEventListener('click', nextLevel);
+            musicBtn.addEventListener('click', toggleMusic);
+            
+            // 移动端触摸控制
+            const addButtonListener = (element, dx, dy) => {
+                // 鼠标事件
+                element.addEventListener('mousedown', () => movePlayer(dx, dy));
+                // 触摸事件
+                element.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    movePlayer(dx, dy);
+                });
+            }
+            
+            addButtonListener(document.getElementById('up-btn'), 0, -1);
+            addButtonListener(document.getElementById('down-btn'), 0, 1);
+            addButtonListener(document.getElementById('left-btn'), -1, 0);
+            addButtonListener(document.getElementById('right-btn'), 1, 0);
+        }
+        
+        // 生成迷宫 (使用深度优先搜索算法)
+        function generateMaze(width, height) {
+            maze = [];
+            for (let y = 0; y < height; y++) {
+                maze[y] = [];
+                for (let x = 0; x < width; x++) {
+                    maze[y][x] = { 
+                        top: true, 
+                        right: true, 
+                        bottom: true, 
+                        left: true,
+                        visited: false
+                    };
+                }
+            }
+            
+            const startX = Math.floor(Math.random() * width);
+            const startY = Math.floor(Math.random() * height);
+            const stack = [{x: startX, y: startY}];
+            maze[startY][startX].visited = true;
+            
+            while (stack.length > 0) {
+                const current = stack[stack.length - 1];
+                const neighbors = getUnvisitedNeighbors(current.x, current.y, width, height);
+                
+                if (neighbors.length === 0) {
+                    stack.pop();
+                } else {
+                    const next = neighbors[Math.floor(Math.random() * neighbors.length)];
+                    removeWallBetween(current, next);
+                    maze[next.y][next.x].visited = true;
+                    stack.push(next);
+                }
+            }
+            
+            player.x = Math.floor(Math.random() * width);
+            player.y = Math.floor(Math.random() * height);
+            
+            do {
+                end.x = Math.floor(Math.random() * width);
+                end.y = Math.floor(Math.random() * height);
+            } while (end.x === player.x && end.y === player.y);
+        }
+        
+        function getUnvisitedNeighbors(x, y, width, height) {
+            const neighbors = [];
+            if (y > 0 && !maze[y-1][x].visited) neighbors.push({x: x, y: y-1, dir: 'top'});
+            if (x < width-1 && !maze[y][x+1].visited) neighbors.push({x: x+1, y: y, dir: 'right'});
+            if (y < height-1 && !maze[y+1][x].visited) neighbors.push({x: x, y: y+1, dir: 'bottom'});
+            if (x > 0 && !maze[y][x-1].visited) neighbors.push({x: x-1, y: y, dir: 'left'});
+            return neighbors;
+        }
+        
+        function removeWallBetween(a, b) {
+            if (a.x === b.x) {
+                if (a.y < b.y) {
+                    maze[a.y][a.x].bottom = false;
+                    maze[b.y][b.x].top = false;
+                } else {
+                    maze[a.y][a.x].top = false;
+                    maze[b.y][b.x].bottom = false;
+                }
+            } else if (a.y === b.y) {
+                if (a.x < b.x) {
+                    maze[a.y][a.x].right = false;
+                    maze[b.y][b.x].left = false;
+                } else {
+                    maze[a.y][a.x].left = false;
+                    maze[b.y][b.x].right = false;
+                }
+            }
+        }
+        
+        function drawMaze() {
+            const width = maze[0].length;
+            const height = maze.length;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 绘制墙壁
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const cell = maze[y][x];
+                    const cellX = x * CELL_SIZE * (canvas.width/400);
+                    const cellY = y * CELL_SIZE * (canvas.height/400);
+                    const scaledCell = CELL_SIZE * (canvas.width/400);
+                    
+                    ctx.strokeStyle = WALL_COLOR;
+                    ctx.lineWidth = 2;
+                    
+                    if (cell.top) drawLine(cellX, cellY, cellX + scaledCell, cellY);
+                    if (cell.right) drawLine(cellX + scaledCell, cellY, cellX + scaledCell, cellY + scaledCell);
+                    if (cell.bottom) drawLine(cellX, cellY + scaledCell, cellX + scaledCell, cellY + scaledCell);
+                    if (cell.left) drawLine(cellX, cellY, cellX, cellY + scaledCell);
+                }
+            }
+            
+            // 绘制角色和终点
+            const startX = player.x * CELL_SIZE * (canvas.width/400) + CELL_SIZE * (canvas.width/400)/2;
+            const startY = player.y * CELL_SIZE * (canvas.height/400) + CELL_SIZE * (canvas.height/400)/2;
+            const endX = end.x * CELL_SIZE * (canvas.width/400) + CELL_SIZE * (canvas.width/400)/2;
+            const endY = end.y * CELL_SIZE * (canvas.height/400) + CELL_SIZE * (canvas.height/400)/2;
+            const scaledPlayerSize = PLAYER_SIZE * (canvas.width/400);
+
+            drawCircle(startX, startY, START_COLOR, '王', scaledPlayerSize);
+            drawCircle(endX, endY, END_COLOR, '炫', scaledPlayerSize);
+            drawCircle(startX, startY, PLAYER_COLOR, '', scaledPlayerSize - 2);
+        }
+
+        function drawLine(x1, y1, x2, y2) {
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+        }
+
+        function drawCircle(x, y, color, text, size) {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(x, y, size/2, 0, Math.PI * 2);
+            ctx.fill();
+            if (text) {
+                ctx.fillStyle = 'white';
+                ctx.font = `bold ${12 * (canvas.width/400)}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(text, x, y);
+            }
+        }
+        
+        function handleKeyDown(e) {
+            switch (e.key) {
+                case 'ArrowUp': movePlayer(0, -1); break;
+                case 'ArrowRight': movePlayer(1, 0); break;
+                case 'ArrowDown': movePlayer(0, 1); break;
+                case 'ArrowLeft': movePlayer(-1, 0); break;
+            }
+        }
+        
+        function movePlayer(dx, dy) {
+            const newX = player.x + dx;
+            const newY = player.y + dy;
+            if (newX < 0 || newY < 0 || newY >= maze.length || newX >= maze[0].length) return;
+            
+            const cell = maze[player.y][player.x];
+            if ((dx === 1 && cell.right) || (dx === -1 && cell.left) || 
+                (dy === 1 && cell.bottom) || (dy === -1 && cell.top)) return;
+            
+            player.x = newX;
+            player.y = newY;
+            if (player.x === end.x && player.y === end.y) winGame();
+            drawMaze();
+        }
+        
+        function startTimer() {
+            clearInterval(timer);
+            timer = setInterval(() => {
+                timeLeft--;
+                timeDisplay.textContent = timeLeft;
+                if (timeLeft <= 0) {
+                    clearInterval(timer);
+                    gameOver();
+                }
+            }, 1000);
+        }
+        
+        function winGame() {
+            clearInterval(timer);
+            const timeUsed = Math.max(20, 70 - level * 5) - timeLeft;
+            if (!bestTimes[level] || timeUsed < bestTimes[level]) {
+                bestTimes[level] = timeUsed;
+                bestTimeDisplay.textContent = timeUsed;
+            }
+            
+            kissEffect.style.display = 'flex';
+            setTimeout(() => {
+                kissEffect.style.display = 'none';
+                alert(`恭喜！你通过了第${level}关！用时: ${timeUsed}秒\n王成功找到了炫，获得了一个亲亲奖励！😘`);
+                nextLevelBtn.disabled = false;
+            }, 1000);
+        }
+        
+        function gameOver() {
+            alert(`时间到！游戏结束。你没能完成第${level}关。`);
+            restartLevel();
+        }
+        
+        function restartLevel() {
+            nextLevelBtn.disabled = true;
+            initGame();
+        }
+        
+        function nextLevel() {
+            level++;
+            levelDisplay.textContent = level;
+            nextLevelBtn.disabled = true;
+            initGame();
+        }
+        
+        function toggleMusic() {
+            musicPlaying = !musicPlaying;
+            if (musicPlaying) {
+                bgMusic.play();
+                musicBtn.textContent = "暂停音乐";
+            } else {
+                bgMusic.pause();
+                musicBtn.textContent = "播放音乐";
+            }
+        }
+        
+        // 初始化游戏
+        initGame();
+    </script>
+</body>
+</html>
